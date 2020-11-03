@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+	"elysium",
+	"elysium-core",
+	"elysium-data",
+]
