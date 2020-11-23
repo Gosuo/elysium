@@ -32,7 +32,7 @@ pub struct Elysium {
 
     graphics_queue: Arc<Queue>,
 
-    command_buffer_pool: Arc<AutoCommandBufferBuilder>,
+    command_buffer: Vec<Arc<AutoCommandBuffer>>,
 
     dimensions: [u32; 2],
     swapchain: Arc<Swapchain<Window>>,
@@ -129,10 +129,6 @@ impl Elysium {
             .unwrap()
         };
 
-        let command_buffer_pool = Arc::new(
-            AutoCommandBufferBuilder::new(device.clone(), graphics_queue.family()).unwrap(),
-        );
-
         let vk_device = device;
 
         Self {
@@ -140,7 +136,7 @@ impl Elysium {
             vk_physical_device_index,
             vk_device,
             graphics_queue,
-            command_buffer_pool,
+            command_buffer: vec![],
             dimensions,
             swapchain,
             swapchain_images,
@@ -148,6 +144,18 @@ impl Elysium {
             event_loop,
         }
     }
+
+    //fn create_command_buffers(&mut self) {
+    //    let queue_family = self.graphics_queue.family();
+    //    self.command_buffer = self.swapchain_images.iter()
+    //        .map(|framebuffer| {
+    //            Arc::new(AutoCommandBufferBuilder::primary_simultaneous_use(self.vk_device.clone(), queue_family)
+    //                .unwrap()
+    //                .begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into()])
+    //                .unwrap()
+    //                .draw_indexed(pipeline, dynamic, vertex_buffer, index_buffer, sets, constants)
+    //        })
+    //}
 
     //pub fn init(&mut self) {
     //    self.event_loop = EventLoop::new();
