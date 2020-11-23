@@ -93,57 +93,8 @@ impl Elysium {
         }
     }
 
-    fn init_vulkan(&mut self) {
-        self.vk_instance = {
-            let required_extensions = vulkano_win::required_extensions();
-            Instance::new(None, &required_extensions, None)
-                .expect("Couldn't create the Vulkan instance")
-        };
-
-        self.vk_physical_device_index = {
-            let physical = PhysicalDevice::enumerate(&self.vk_instance)
-                .next()
-                .expect("No device chosen");
-            physical.index()
-        };
-
-        self.surface = WindowBuilder::new()
-            .build_vk_surface(&self.event_loop, self.vk_instance.clone())
-            .unwrap();
-
-        self.dimensions = self.surface.window().inner_size().into();
-
-        let (device, mut queues) = {
-            let device_ext = DeviceExtensions {
-                khr_swapchain: true,
-                ..DeviceExtensions::none()
-            };
-
-            let physical =
-                PhysicalDevice::from_index(&self.vk_instance, self.vk_physical_device_index)
-                    .unwrap();
-
-            let queue_family = physical
-                .queue_families()
-                .find(|&q| q.supports_graphics() && self.surface.is_supported(q).unwrap_or(false))
-                .unwrap();
-
-            Device::new(
-                physical,
-                physical.supported_features(),
-                &device_ext,
-                [(queue_family, 0.5)].iter().cloned(),
-            )
-            .unwrap()
-        };
-
-        self.vk_device = device;
-        self.graphics_queue = queues.next().unwrap();
-    }
-
     pub fn init(&mut self) {
         self.event_loop = EventLoop::new();
-        self.init_vulkan();
     }
 }
 
