@@ -13,8 +13,8 @@ use vulkano::{
     },
     device::{Device, DeviceExtensions, Queue},
     format::Format,
-    framebuffer::RenderPassAbstract,
-    image::{ImageUsage, SwapchainImage},
+    framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract},
+    image::{ImageUsage, SwapchainImage, AttachmentImage},
     instance::{Instance, PhysicalDevice},
     swapchain::{
         ColorSpace, FullscreenExclusive, PresentMode, Surface, SurfaceCreationError,
@@ -39,7 +39,9 @@ pub struct Elysium {
     dimensions: [u32; 2],
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
+
     renderpass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
     surface: Arc<Surface<Window>>,
     event_loop: EventLoop<()>,
@@ -81,6 +83,8 @@ impl Elysium {
 
         let renderpass = Self::create_renderpass(device.clone(), swapchain.clone());
 
+        let framebuffers = Self::create_framebuffers(device.clone(), renderpass.clone(), &swapchain_images);
+
         Self {
             instance,
             physical_device_index,
@@ -91,6 +95,7 @@ impl Elysium {
             swapchain,
             swapchain_images,
             renderpass,
+            framebuffers,
             surface,
             event_loop,
         }
@@ -196,6 +201,32 @@ impl Elysium {
             )
             .unwrap(),
         )
+    }
+
+    fn create_framebuffers(
+        device: Arc<Device>,
+        renderpass: Arc<dyn RenderPassAbstract + Send + Sync>,
+        images: &[Arc<SwapchainImage<Window>>],
+    ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+        let dimensions = images[0].dimensions();
+
+        let depth_buffer =
+            AttachmentImage::transient(device.clone(), dimensions, Format::D16Unorm).unwrap();
+
+        images
+            .iter()
+            .map(|image| {
+                Arc::new(
+                    Framebuffer::start(renderpass.clone())
+                        .add(image.clone())
+                        .unwrap()
+                        .add(depth_buffer.clone())
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                ) as Arc<dyn FramebufferAbstract + Send + Sync>
+            })
+            .collect::<Vec<_>>()
     }
 
     //fn create_command_buffers(&mut self) {
