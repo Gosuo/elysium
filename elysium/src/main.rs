@@ -3,7 +3,6 @@ use elysium_core::Elysium;
 fn main() {
     env_logger::init();
     let elysium = Elysium::new();
-    let end = elysium.run();
+    elysium.run();
     println!("Hello from main");
-    end.join().expect("Couldn't join the render thread");
 }

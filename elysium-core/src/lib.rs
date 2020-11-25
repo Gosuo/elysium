@@ -1,30 +1,45 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 #![allow(unused_import_braces)]
-use std::sync::Arc;
-use std::thread;
+use std::{sync::Arc, time::Instant};
+use std::{thread, time::Duration};
 
 use log::{debug, error, info, warn};
 
 use vulkano::{
+    buffer::BufferAccess,
+    buffer::BufferUsage,
+    buffer::CpuAccessibleBuffer,
     command_buffer::{
         pool::{standard::StandardCommandPoolBuilder, CommandPool, CommandPoolBuilderAlloc},
-        AutoCommandBuffer, AutoCommandBufferBuilder,
+        AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState,
     },
     device::{Device, DeviceExtensions, Queue},
     format::Format,
-    framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract},
-    image::{ImageUsage, SwapchainImage, AttachmentImage},
+    framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
+    image::{AttachmentImage, ImageUsage, SwapchainImage},
     instance::{Instance, PhysicalDevice},
+    pipeline::viewport::Viewport,
+    pipeline::GraphicsPipeline,
+    pipeline::GraphicsPipelineAbstract,
     swapchain::{
-        ColorSpace, FullscreenExclusive, PresentMode, Surface, SurfaceCreationError,
-        SurfaceTransform, Swapchain, SwapchainCreationError,
+        self, AcquireError, ColorSpace, FullscreenExclusive, PresentMode, Surface,
+        SurfaceCreationError, SurfaceTransform, Swapchain, SwapchainCreationError,
     },
+    sync::{self, FlushError, GpuFuture},
 };
 
 use vulkano_win::VkSurfaceBuild;
-use winit::event_loop::EventLoop;
+use winit::event::Event;
+use winit::event::WindowEvent;
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
+
+#[derive(Default, Debug, Clone)]
+struct Vertex {
+    position: [f32; 2],
+}
+vulkano::impl_vertex!(Vertex, position);
 
 #[allow(dead_code)]
 pub struct Elysium {
@@ -35,6 +50,7 @@ pub struct Elysium {
     graphics_queue: Arc<Queue>,
 
     command_buffer: Vec<Arc<AutoCommandBuffer>>,
+    vertex_buffer: Arc<dyn BufferAccess + Send + Sync>,
 
     dimensions: [u32; 2],
     swapchain: Arc<Swapchain<Window>>,
@@ -42,14 +58,153 @@ pub struct Elysium {
 
     renderpass: Arc<dyn RenderPassAbstract + Send + Sync>,
     framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+    dynamic_state: DynamicState,
+
+    previous_frame_end: Option<Box<dyn GpuFuture>>,
+    recreate_swapchain: bool,
 
     surface: Arc<Surface<Window>>,
-    event_loop: EventLoop<()>,
+    event_loop: Option<EventLoop<()>>,
+
+    vs: vs::Shader,
+    fs: fs::Shader,
 }
 
 impl Elysium {
-    pub fn run(&self) -> thread::JoinHandle<()> {
-        thread::spawn(|| println!("Hello from render thread"))
+    pub fn run(mut self) {
+        match self.event_loop {
+            Some(_) => {
+                let event_loop = self.event_loop.take().unwrap();
+                let start_time = Instant::now();
+                let mut last_time = start_time.clone();
+                event_loop.run(move |event, _, control_flow| {
+                    match event {
+                        Event::WindowEvent {
+                            event: WindowEvent::CloseRequested,
+                            ..
+                        } => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        Event::WindowEvent {
+                            event: WindowEvent::Resized(_),
+                            ..
+                        } => {
+                            self.recreate_swapchain = true;
+                        }
+                        Event::MainEventsCleared => {
+                            //if start_time.elapsed() > Duration::from_secs(1) {
+                            //    *control_flow = ControlFlow::Exit;
+                            //}
+                            self.draw();
+                            //println!(
+                            //    "elapsed: {:?}\tdelta: {:?}",
+                            //    start_time.elapsed(),
+                            //    last_time.elapsed()
+                            //);
+                            print!("\rfps: {:?}", 1f64 / last_time.elapsed().as_secs_f64());
+                            last_time = Instant::now();
+                        }
+                        _ => (),
+                    }
+                });
+            }
+            None => self.reinit(),
+        }
+    }
+
+    fn reinit(&mut self) {
+        todo!("Need to implement this maybe");
+    }
+
+    fn draw(&mut self) {
+        self.previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+        if self.recreate_swapchain {
+            let dims: [u32; 2] = self.surface.window().inner_size().into();
+
+            let (new_swapchain, new_images) = match self.swapchain.recreate_with_dimensions(dims) {
+                Ok(r) => r,
+                Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+            };
+
+            self.swapchain = new_swapchain;
+            self.swapchain_images = new_images;
+
+            let (framebuffers, dynamic_state) = Self::create_framebuffers(
+                self.device.clone(),
+                self.renderpass.clone(),
+                &self.swapchain_images,
+            );
+
+            self.framebuffers = framebuffers;
+            self.dynamic_state = dynamic_state;
+
+            self.dimensions = dims;
+            self.recreate_swapchain = false;
+        }
+
+        let (image_num, suboptimal, acquire_future) =
+            match swapchain::acquire_next_image(self.swapchain.clone(), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => {
+                    return;
+                }
+                Err(e) => panic!("Failed to acquire next image: {:?}", e),
+            };
+
+        let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()];
+
+        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(
+            self.device.clone(),
+            self.graphics_queue.family(),
+        )
+        .unwrap();
+
+        builder
+            .begin_render_pass(self.framebuffers[image_num].clone(), false, clear_values)
+            .unwrap()
+            .draw(
+                self.pipeline.clone(),
+                &self.dynamic_state,
+                vec![self.vertex_buffer.clone()],
+                (),
+                (),
+            )
+            .unwrap()
+            .end_render_pass()
+            .unwrap();
+
+        let command_buffer = builder.build().unwrap();
+
+        let future = self
+            .previous_frame_end
+            .take()
+            .unwrap()
+            .join(acquire_future)
+            .then_execute(self.graphics_queue.clone(), command_buffer)
+            .unwrap()
+            .then_swapchain_present(
+                self.graphics_queue.clone(),
+                self.swapchain.clone(),
+                image_num,
+            )
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                self.previous_frame_end = Some(future.boxed());
+            }
+            Err(FlushError::OutOfDate) => {
+                self.recreate_swapchain = true;
+                self.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+            }
+            Err(e) => {
+                warn!("Failed to flush future: {:?}", e);
+                self.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+            }
+        }
     }
 
     pub fn new() -> Self {
@@ -83,7 +238,47 @@ impl Elysium {
 
         let renderpass = Self::create_renderpass(device.clone(), swapchain.clone());
 
-        let framebuffers = Self::create_framebuffers(device.clone(), renderpass.clone(), &swapchain_images);
+        let (framebuffers, dynamic_state) =
+            Self::create_framebuffers(device.clone(), renderpass.clone(), &swapchain_images);
+
+        let previous_frame_end = Some(sync::now(device.clone()).boxed());
+
+        let vertex_buffer = {
+            CpuAccessibleBuffer::from_iter(
+                device.clone(),
+                BufferUsage::all(),
+                false,
+                [
+                    Vertex {
+                        position: [-0.5, -0.25],
+                    },
+                    Vertex {
+                        position: [0.0, 0.5],
+                    },
+                    Vertex {
+                        position: [0.25, -0.1],
+                    },
+                ]
+                .iter()
+                .cloned(),
+            )
+            .unwrap()
+        };
+
+        let vs = vs::Shader::load(device.clone()).unwrap();
+        let fs = fs::Shader::load(device.clone()).unwrap();
+
+        let pipeline = Arc::new(
+            GraphicsPipeline::start()
+                .vertex_input_single_buffer::<Vertex>()
+                .vertex_shader(vs.main_entry_point(), ())
+                .triangle_list()
+                .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs.main_entry_point(), ())
+                .render_pass(Subpass::from(renderpass.clone(), 0).unwrap())
+                .build(device.clone())
+                .unwrap(),
+        );
 
         Self {
             instance,
@@ -91,13 +286,20 @@ impl Elysium {
             device,
             graphics_queue,
             command_buffer: vec![],
+            vertex_buffer,
             dimensions,
             swapchain,
             swapchain_images,
             renderpass,
+            dynamic_state,
             framebuffers,
+            pipeline,
+            previous_frame_end,
+            recreate_swapchain: false,
             surface,
-            event_loop,
+            event_loop: Some(event_loop),
+            vs,
+            fs,
         }
     }
 
@@ -207,13 +409,31 @@ impl Elysium {
         device: Arc<Device>,
         renderpass: Arc<dyn RenderPassAbstract + Send + Sync>,
         images: &[Arc<SwapchainImage<Window>>],
-    ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+    ) -> (
+        Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+        DynamicState,
+    ) {
         let dimensions = images[0].dimensions();
 
         let depth_buffer =
             AttachmentImage::transient(device.clone(), dimensions, Format::D16Unorm).unwrap();
 
-        images
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+            depth_range: 0.0..1.0,
+        };
+
+        let dynamic_state = DynamicState {
+            line_width: None,
+            viewports: Some(vec![viewport]),
+            scissors: None,
+            compare_mask: None,
+            write_mask: None,
+            reference: None,
+        };
+
+        let framebuffers = images
             .iter()
             .map(|image| {
                 Arc::new(
@@ -226,7 +446,9 @@ impl Elysium {
                         .unwrap(),
                 ) as Arc<dyn FramebufferAbstract + Send + Sync>
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+
+        (framebuffers, dynamic_state)
     }
 
     //fn create_command_buffers(&mut self) {
@@ -240,6 +462,32 @@ impl Elysium {
     //                .draw_indexed(pipeline, dynamic, vertex_buffer, index_buffer, sets, constants)
     //        })
     //}
+}
+
+mod vs {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        src: "
+                            #version 450
+                            layout(location = 0) in vec2 position;
+                            void main() {
+                                    gl_Position = vec4(position, 0.0, 1.0);
+                            }
+                    "
+    }
+}
+
+mod fs {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        src: "
+                            #version 450
+                            layout(location = 0) out vec4 f_color;
+                            void main() {
+                                    f_color = vec4(1.0, 0.0, 0.0, 1.0);
+                            }
+                    "
+    }
 }
 
 #[cfg(test)]
