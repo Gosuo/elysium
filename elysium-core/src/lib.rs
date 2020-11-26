@@ -1,33 +1,33 @@
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(unused_import_braces)]
-use std::{sync::Arc, time::Instant};
-use std::{thread, time::Duration};
+use std::sync::Arc;
+use std::time::Instant;
 
+#[allow(unused_imports)]
 use log::{debug, error, info, warn};
 
-use vulkano::{
-    buffer::BufferAccess,
-    buffer::BufferUsage,
-    buffer::CpuAccessibleBuffer,
-    command_buffer::{
-        pool::{standard::StandardCommandPoolBuilder, CommandPool, CommandPoolBuilderAlloc},
-        AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState,
-    },
-    device::{Device, DeviceExtensions, Queue},
-    format::Format,
-    framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
-    image::{AttachmentImage, ImageUsage, SwapchainImage},
-    instance::{Instance, PhysicalDevice},
-    pipeline::viewport::Viewport,
-    pipeline::GraphicsPipeline,
-    pipeline::GraphicsPipelineAbstract,
-    swapchain::{
-        self, AcquireError, ColorSpace, FullscreenExclusive, PresentMode, Surface,
-        SurfaceCreationError, SurfaceTransform, Swapchain, SwapchainCreationError,
-    },
-    sync::{self, FlushError, GpuFuture},
-};
+use vulkano::buffer::BufferAccess;
+use vulkano::buffer::BufferUsage;
+use vulkano::buffer::CpuAccessibleBuffer;
+use vulkano::command_buffer::AutoCommandBuffer;
+use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::command_buffer::DynamicState;
+use vulkano::device::{Device, DeviceExtensions, Queue};
+use vulkano::format::Format;
+use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
+use vulkano::image::{AttachmentImage, ImageUsage, SwapchainImage};
+use vulkano::instance::{Instance, PhysicalDevice};
+use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::GraphicsPipelineAbstract;
+use vulkano::swapchain;
+use vulkano::swapchain::AcquireError;
+use vulkano::swapchain::ColorSpace;
+use vulkano::swapchain::FullscreenExclusive;
+use vulkano::swapchain::PresentMode;
+use vulkano::swapchain::Surface;
+use vulkano::swapchain::SurfaceTransform;
+use vulkano::swapchain::Swapchain;
+use vulkano::swapchain::SwapchainCreationError;
+use vulkano::sync::{self, FlushError, GpuFuture};
 
 use vulkano_win::VkSurfaceBuild;
 use winit::event::Event;
@@ -153,6 +153,10 @@ impl Elysium {
                 }
                 Err(e) => panic!("Failed to acquire next image: {:?}", e),
             };
+
+        if suboptimal {
+            self.recreate_swapchain = true;
+        }
 
         let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()];
 
@@ -492,8 +496,6 @@ mod fs {
 
 #[cfg(test)]
 mod tests {
-    use super::Elysium;
-
     #[test]
     fn it_works() {
         assert!(true);
