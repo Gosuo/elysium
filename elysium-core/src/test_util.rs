@@ -7,10 +7,7 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-use vulkano;
-
-#![cfg(test)]
-
+#[allow(unused_macros)]
 /// Creates an instance or returns if initialization fails.
 macro_rules! instance {
     () => {{
@@ -69,6 +66,7 @@ macro_rules! gfx_dev_and_queue {
     });
 }
 
+#[allow(unused_macros)]
 macro_rules! assert_should_panic {
     ($msg:expr, $code:block) => {{
         let res = ::std::panic::catch_unwind(|| $code);
