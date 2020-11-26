@@ -35,6 +35,9 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
+#[macro_use]
+mod test_util;
+
 #[derive(Default, Debug, Clone)]
 struct Vertex {
     position: [f32; 2],
@@ -387,18 +390,18 @@ impl Elysium {
         Arc::new(
             vulkano::single_pass_renderpass!(device.clone(),
                 attachments: {
-                color: {
-                    load: Clear,
-                    store: Store,
-                    format: swapchain.format(),
-                    samples: 1,
-                },
-                depth: {
-                    load: Clear,
-                    store: DontCare,
-                    format: Format::D16Unorm,
-                    samples: 1,
-                }
+                    color: {
+                        load: Clear,
+                        store: Store,
+                        format: swapchain.format(),
+                        samples: 1,
+                    },
+                    depth: {
+                        load: Clear,
+                        store: DontCare,
+                        format: Format::D16Unorm,
+                        samples: 1,
+                    }
                 },
                 pass: {
                     color: [color],
